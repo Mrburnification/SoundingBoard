@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Soundboard</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h1>Soundboard</h1>
+    <div class="header-controls">
+      <label class="toggle-label" title="Allow multiple sounds at once">
+        <span>Simultaneous</span>
+        <input type="checkbox" id="polyToggle">
+        <span class="toggle-track"></span>
+      </label>
+      <button id="addBtn">+ Add Sound</button>
+    </div>
+  </header>
+
+  <main id="soundboard">
+    <div id="emptyState" class="empty-state">
+      <p>No sounds yet!</p>
+      <p class="sub">Click <strong>+ Add Sound</strong> to get started.</p>
+    </div>
+  </main>
+
+  <div id="modal" class="modal hidden">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+      <button class="close-btn">&times;</button>
+      <h2 id="modalTitle">Add Sound</h2>
+
+      <div class="form-group">
+        <label for="youtubeUrl">YouTube URL</label>
+        <div class="input-row">
+          <input type="text" id="youtubeUrl" placeholder="https://youtube.com/watch?v=...">
+          <button id="fetchBtn" class="secondary">Fetch</button>
+        </div>
+      </div>
+
+      <div id="fetchStatus" class="status-msg"></div>
+
+      <div id="stepInfo" class="step hidden">
+        <div class="form-group">
+          <div class="video-meta" id="videoMeta">
+            <span id="videoTitle"></span>
+            <span class="duration-label" id="videoDuration"></span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <div class="range-header">
+            <span>Start</span>
+            <span class="time-display" id="startDisplay">0:00</span>
+          </div>
+          <input type="range" id="startSlider" min="0" max="100" value="0" step="0.1">
+        </div>
+
+        <div class="form-group">
+          <div class="range-header">
+            <span>End</span>
+            <span class="time-display" id="endDisplay">0:00</span>
+          </div>
+          <input type="range" id="endSlider" min="0" max="100" value="100" step="0.1">
+        </div>
+
+        <fieldset>
+          <legend>Button Style</legend>
+          <div class="form-group">
+            <label for="btnLabel">Label</label>
+            <input type="text" id="btnLabel" placeholder="e.g. Laugh Track">
+          </div>
+          <div class="form-group">
+            <label for="btnEmoji">Emoji</label>
+            <input type="text" id="btnEmoji" placeholder="😂" maxlength="4">
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="btnBgColor">Background</label>
+              <input type="color" id="btnBgColor" value="#6c5ce7">
+            </div>
+            <div class="form-group">
+              <label for="btnTextColor">Text</label>
+              <input type="color" id="btnTextColor" value="#ffffff">
+            </div>
+          </div>
+        </fieldset>
+
+        <button id="saveBtn" class="primary">Add to Soundboard</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
