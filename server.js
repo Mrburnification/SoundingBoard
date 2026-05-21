@@ -19,9 +19,19 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const YTDLP = process.platform === 'win32' ? ['python', '-m', 'yt_dlp'] : ['yt-dlp'];
 
+const COOKIES_PATHS = [
+  path.join(__dirname, 'cookies.txt'),
+  '/etc/secrets/cookies.txt',
+];
+const COOKIES_ARG = COOKIES_PATHS.find(p => fs.existsSync(p));
+
+const EXTRACTOR_ARGS = 'youtube:player_client=android,web;skip=webpage';
+
 function ytdlp(args) {
+  const allArgs = [...args];
+  if (COOKIES_ARG) allArgs.push('--cookies', COOKIES_ARG);
   return new Promise((resolve, reject) => {
-    const proc = execFile(YTDLP[0], [...YTDLP.slice(1), ...args], {
+    const proc = execFile(YTDLP[0], [...YTDLP.slice(1), ...allArgs], {
       maxBuffer: 10 * 1024 * 1024,
       cwd: __dirname,
     }, (err, stdout, stderr) => {
@@ -40,7 +50,7 @@ app.get('/api/health', (req, res) => res.json({ ok: true }));
 app.post('/api/video-info', async (req, res) => {
   try {
     const { youtubeUrl } = req.body;
-    const stdout = await ytdlp(['--dump-json', '--no-warnings', '--extractor-args', 'youtube:player_client=android', youtubeUrl]);
+    const stdout = await ytdlp(['--dump-json', '--no-warnings', '--extractor-args', EXTRACTOR_ARGS, youtubeUrl]);
     const data = JSON.parse(stdout);
     res.json({
       title: data.title || 'Unknown',
@@ -70,7 +80,7 @@ app.post('/api/sounds', async (req, res) => {
       '--no-playlist',
       '--no-check-formats',
       '--embed-metadata',
-      '--extractor-args', 'youtube:player_client=android',
+      '--extractor-args', EXTRACTOR_ARGS,
       youtubeUrl,
     ]);
 
