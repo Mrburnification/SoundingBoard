@@ -35,6 +35,8 @@ function ytdlp(args) {
   });
 }
 
+app.get('/api/health', (req, res) => res.json({ ok: true }));
+
 app.post('/api/video-info', async (req, res) => {
   try {
     const { youtubeUrl } = req.body;

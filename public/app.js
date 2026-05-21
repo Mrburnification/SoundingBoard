@@ -430,12 +430,7 @@ async function waitForServer() {
     try {
       const ctrl = new AbortController();
       const id = setTimeout(() => ctrl.abort(), 4000);
-      await fetch('/api/video-info', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: '{}',
-        signal: ctrl.signal,
-      });
+      await fetch('/api/health', { signal: ctrl.signal });
       clearTimeout(id);
       return;
     } catch {
@@ -456,10 +451,7 @@ async function waitForServer() {
   const ctrl = new AbortController();
   const id = setTimeout(() => ctrl.abort(), 3000);
   try {
-    await fetch('/api/video-info', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: '{}', signal: ctrl.signal,
-    });
+    await fetch('/api/health', { signal: ctrl.signal });
     clearTimeout(id);
     wakeOverlay.classList.add('hidden');
   } catch {
