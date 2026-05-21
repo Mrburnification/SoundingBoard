@@ -425,44 +425,5 @@ document.addEventListener('click', (e) => {
   }
 });
 
-const wakeOverlay = $('#wakeOverlay');
-const wakeBar = $('#wakeBarFill');
-
-async function waitForServer() {
-  let elapsed = 0;
-  while (true) {
-    try {
-      const ctrl = new AbortController();
-      const id = setTimeout(() => ctrl.abort(), 4000);
-      await fetch('/api/health', { signal: ctrl.signal });
-      clearTimeout(id);
-      return;
-    } catch {
-      elapsed += 2;
-      wakeBar.style.width = Math.min((elapsed / 60) * 100, 90) + '%';
-      await new Promise((r) => setTimeout(r, 2000));
-    }
-  }
-}
-
-(async () => {
-  if (!navigator.onLine) {
-    wakeOverlay.classList.add('hidden');
-    loadState();
-    render();
-    return;
-  }
-  const ctrl = new AbortController();
-  const id = setTimeout(() => ctrl.abort(), 3000);
-  try {
-    await fetch('/api/health', { signal: ctrl.signal });
-    clearTimeout(id);
-    wakeOverlay.classList.add('hidden');
-  } catch {
-    clearTimeout(id);
-    await waitForServer();
-    wakeOverlay.classList.add('hidden');
-  }
-  loadState();
-  render();
-})();
+loadState();
+render();

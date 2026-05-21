@@ -26,15 +26,6 @@
     </div>
   </main>
 
-  <div id="wakeOverlay" class="wake-overlay">
-    <div class="wake-box">
-      <div class="wake-spinner"></div>
-      <p class="wake-title">Server is waking up...</p>
-      <p class="wake-sub">This happens after a period of inactivity. <br>Should be just a moment.</p>
-      <div class="wake-bar"><div class="wake-bar-fill" id="wakeBarFill"></div></div>
-    </div>
-  </div>
-
   <div id="modal" class="modal hidden">
     <div class="modal-overlay"></div>
     <div class="modal-content">
@@ -102,11 +93,6 @@
     </div>
   </div>
 
-  <script>
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js');
-    }
-  </script>
   <script src="app.js"></script>
 </body>
 </html>
