@@ -53,6 +53,7 @@ app.get('/api/health', (req, res) => res.json({ ok: true }));
 app.post('/api/video-info', async (req, res) => {
   try {
     const { youtubeUrl } = req.body;
+    if (!youtubeUrl) return res.status(400).json({ error: 'YouTube URL is required' });
     const stdout = await ytdlp(['--dump-json', '--no-warnings', '--extractor-args', EXTRACTOR_ARGS, youtubeUrl]);
     const data = JSON.parse(stdout);
     res.json({
@@ -67,6 +68,7 @@ app.post('/api/video-info', async (req, res) => {
 
 app.post('/api/sounds', async (req, res) => {
   const { youtubeUrl, startSec, endSec } = req.body;
+  if (!youtubeUrl) return res.status(400).json({ error: 'YouTube URL is required' });
   const id = crypto.randomBytes(8).toString('hex');
   const outputPath = path.join(CACHE_DIR, `${id}.mp3`);
   const duration = endSec - startSec;
