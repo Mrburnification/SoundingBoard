@@ -17,11 +17,11 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-const PYTHON = process.platform === 'win32' ? 'python' : 'python3';
+const YTDLP = process.platform === 'win32' ? ['python', '-m', 'yt_dlp'] : ['yt-dlp'];
 
 function ytdlp(args) {
   return new Promise((resolve, reject) => {
-    const proc = execFile(PYTHON, ['-m', 'yt_dlp', ...args], {
+    const proc = execFile(YTDLP[0], [...YTDLP.slice(1), ...args], {
       maxBuffer: 10 * 1024 * 1024,
       cwd: __dirname,
     }, (err, stdout, stderr) => {
@@ -60,10 +60,10 @@ app.post('/api/sounds', async (req, res) => {
 
   try {
     await ytdlp([
-      '-f', 'bestaudio',
+      '-f', 'worstaudio',
       '--extract-audio',
       '--audio-format', 'mp3',
-      '--audio-quality', '128K',
+      '--audio-quality', '10',
       '--postprocessor-args', `ffmpeg:-ss ${startSec} -t ${duration}`,
       '-o', path.join(CACHE_DIR, `${id}.%(ext)s`),
       '--no-warnings',
