@@ -40,7 +40,7 @@ app.get('/api/health', (req, res) => res.json({ ok: true }));
 app.post('/api/video-info', async (req, res) => {
   try {
     const { youtubeUrl } = req.body;
-    const stdout = await ytdlp(['--dump-json', '--no-warnings', youtubeUrl]);
+    const stdout = await ytdlp(['--dump-json', '--no-warnings', '--extractor-args', 'youtube:player_client=android', youtubeUrl]);
     const data = JSON.parse(stdout);
     res.json({
       title: data.title || 'Unknown',
@@ -70,6 +70,7 @@ app.post('/api/sounds', async (req, res) => {
       '--no-playlist',
       '--no-check-formats',
       '--embed-metadata',
+      '--extractor-args', 'youtube:player_client=android',
       youtubeUrl,
     ]);
 
