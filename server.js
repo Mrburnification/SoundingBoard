@@ -36,8 +36,11 @@ function ytdlp(args) {
       cwd: __dirname,
     }, (err, stdout, stderr) => {
       if (err) {
-        const msg = stderr.split('\n').filter(l => l.startsWith('ERROR'))[0] || err.message;
-        reject(new Error(msg.replace(/^ERROR:\s*/, '')));
+        const lines = stderr.split('\n');
+        const errorLine = lines.find(l => l.startsWith('ERROR')) || lines.find(l => l.startsWith('WARNING'));
+        const msg = errorLine ? errorLine.replace(/^(ERROR|WARNING):\s*/, '') : err.message;
+        console.error('yt-dlp error:', msg);
+        reject(new Error(msg));
       } else {
         resolve(stdout);
       }
@@ -107,6 +110,12 @@ app.delete('/api/sounds/:id', (req, res) => {
     fs.unlinkSync(filePath);
   }
   res.json({ success: true });
+});
+
+// Global error handler — always return JSON
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err.message);
+  res.status(500).json({ error: err.message || 'Internal server error' });
 });
 
 // Periodic cleanup of stale cache files (older than 10 minutes)

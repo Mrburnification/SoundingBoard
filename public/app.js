@@ -228,8 +228,10 @@ async function fetchVideoInfo(url, presetStart, presetEnd) {
       body: JSON.stringify({ youtubeUrl: url }),
     });
     if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error || 'Failed to fetch video info');
+      const text = await res.text();
+      let msg = 'Failed to fetch video info';
+      try { msg = JSON.parse(text).error; } catch { msg = text; }
+      throw new Error(msg);
     }
     const data = await res.json();
     videoInfo = data;
@@ -282,8 +284,10 @@ async function processSound(youtubeUrl, startSec, endSec) {
     body: JSON.stringify({ youtubeUrl, startSec, endSec }),
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || 'Processing failed');
+    const text = await res.text();
+    let msg = 'Processing failed';
+    try { msg = JSON.parse(text).error; } catch { msg = text; }
+    throw new Error(msg);
   }
   const data = await res.json();
   const audioRes = await fetch(`/api/sounds/${data.id}.mp3`);
