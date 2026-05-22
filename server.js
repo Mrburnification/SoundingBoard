@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
+const https = require('https');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -16,6 +17,122 @@ if (!fs.existsSync(CACHE_DIR)) {
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+function extractVideoId(url) {
+  const match = url.match(/(?:v=|\/shorts\/|embed\/|v\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+  return match ? match[1] : null;
+}
+
+const INVIDIOUS_INSTANCES = [
+  'vid.puffyan.us',
+  'invidious.fdn.fr',
+  'inv.tux.pizza',
+  'invidious.privacyredirect.com',
+  'yt.artemislena.eu',
+];
+
+const PIPED_INSTANCES = [
+  'pipedapi.kavin.rocks',
+  'pipedapi.in.projectsegfau.lt',
+  'api.piped.projectsegfau.lt',
+  'piped-api.privacyredirect.com',
+];
+
+function fetchJson(host, p) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(`https://${host}${p}`, { timeout: 10000 }, (res) => {
+      let data = '';
+      res.on('data', (c) => (data += c));
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); } catch { reject(new Error('Invalid JSON')); }
+      });
+    });
+    req.on('error', reject);
+  });
+}
+
+async function tryOembed(youtubeUrl) {
+  try {
+    console.log('Trying YouTube oEmbed API...');
+    const encodedUrl = encodeURIComponent(youtubeUrl);
+    const data = await fetchJson('www.youtube.com', `/oembed?url=${encodedUrl}&format=json`);
+    if (data && data.title) {
+      console.log('oEmbed succeeded');
+      return {
+        title: data.title,
+        duration: 0,
+        thumbnail: data.thumbnail_url || null,
+      };
+    }
+  } catch (e) {
+    console.log('oEmbed failed:', e.message);
+  }
+  return null;
+}
+
+async function tryInvidious(videoId) {
+  for (const host of INVIDIOUS_INSTANCES) {
+    try {
+      console.log('Trying Invidious:', host);
+      const data = await fetchJson(host, `/api/v1/videos/${videoId}`);
+      if (data && data.title) {
+        console.log('Invidious succeeded:', host);
+        return {
+          title: data.title,
+          duration: data.lengthSeconds || 0,
+          thumbnail: data.videoThumbnails?.find(t => t.quality === 'maxresdefault')?.url || data.videoThumbnails?.[0]?.url || null,
+        };
+      }
+    } catch (e) {
+      console.log('Invidious failed:', host, e.message);
+    }
+  }
+  return null;
+}
+
+async function tryPipedStreams(videoId) {
+  for (const host of PIPED_INSTANCES) {
+    try {
+      console.log('Trying Piped:', host);
+      const data = await fetchJson(host, `/streams/${videoId}`);
+      if (data && data.audioStreams) {
+        console.log('Piped succeeded:', host);
+        return data.audioStreams;
+      }
+    } catch (e) {
+      console.log('Piped failed:', host, e.message);
+    }
+  }
+  return null;
+}
+
+function downloadAndTrim(audioUrl, outputPath, startSec, duration) {
+  return new Promise((resolve, reject) => {
+    const ffmpegArgs = [
+      '-y',
+      '-i', audioUrl,
+      '-ss', String(startSec),
+      '-t', String(duration),
+      '-vn',
+      '-acodec', 'libmp3lame',
+      '-q:a', '9',
+      '-ar', '44100',
+      '-ac', '2',
+      outputPath,
+    ];
+    const proc = execFile('ffmpeg', ffmpegArgs, {
+      maxBuffer: 50 * 1024 * 1024,
+      timeout: 120_000,
+    }, (err, stdout, stderr) => {
+      if (err) {
+        console.error('ffmpeg error:', err.message);
+        reject(new Error(stderr.split('\n').filter(l => l.startsWith('Error')).join(' ') || err.message));
+      } else {
+        resolve();
+      }
+    });
+  });
+}
 
 const YTDLP = process.platform === 'win32' ? ['python', '-m', 'yt_dlp'] : ['yt-dlp'];
 
@@ -33,7 +150,6 @@ for (const p of COOKIES_PATHS) {
   }
 }
 
-// Fallback: COOKIES env var (Render Environment Variable with raw cookie content)
 if (!COOKIES_ARG && process.env.COOKIES) {
   const tmpPath = path.join(__dirname, 'cookies_env.txt');
   try {
@@ -46,23 +162,21 @@ if (!COOKIES_ARG && process.env.COOKIES) {
 }
 
 if (!COOKIES_ARG) {
-  console.log('No cookies found. Private/restricted videos will fail.');
+  console.log('No cookies found. Will use Piped/Invidious fallback.');
 }
 
 const YTDLP_CLIENTS = [
-  'youtube:player_client=mweb;player_skip=webpage',
   'youtube:player_client=tv_embedded;player_skip=webpage',
+  'youtube:player_client=mweb;player_skip=webpage',
   'youtube:player_client=ios;player_skip=webpage',
   'youtube:player_client=web;player_skip=webpage',
-  'youtube:player_client=tv;player_skip=webpage',
 ];
 
 const YTDLP_CLIENTS_DOWNLOAD = [
+  'youtube:player_client=tv_embedded',
   'youtube:player_client=mweb',
   'youtube:player_client=web',
   'youtube:player_client=ios',
-  'youtube:player_client=tv_embedded',
-  'youtube:player_client=tv',
 ];
 
 function ytdlp(args, timeoutMs = 120_000) {
@@ -103,7 +217,7 @@ async function ytdlpWithRetry(baseArgs, timeoutMs = 120_000, clients = YTDLP_CLI
       console.log('Client', client.split(';')[0].replace('youtube:', ''), 'failed - trying next...');
     }
   }
-  throw new Error('All player clients failed. Try refreshing cookies.');
+  throw new Error('All player clients failed');
 }
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
@@ -112,13 +226,33 @@ app.post('/api/video-info', async (req, res) => {
   try {
     const { youtubeUrl } = req.body;
     if (!youtubeUrl) return res.status(400).json({ error: 'YouTube URL is required' });
-    const stdout = await ytdlpWithRetry(['--dump-json', '--no-warnings', youtubeUrl]);
-    const data = JSON.parse(stdout);
-    res.json({
-      title: data.title || 'Unknown',
-      duration: data.duration || 0,
-      thumbnail: data.thumbnail || null,
-    });
+    const videoId = extractVideoId(youtubeUrl);
+    if (!videoId) return res.status(400).json({ error: 'Invalid YouTube URL' });
+
+    let data;
+    // Try oEmbed first (free, unlimited, never blocked)
+    data = await tryOembed(youtubeUrl);
+    if (!data) {
+      // Fallback to Invidious
+      console.log('oEmbed failed, trying Invidious fallback...');
+      data = await tryInvidious(videoId);
+    }
+    if (!data) {
+      // Last resort: yt-dlp
+      console.log('Invidious failed, trying yt-dlp...');
+      try {
+        const stdout = await ytdlpWithRetry(['--dump-json', '--no-warnings', youtubeUrl]);
+        const ytdlpData = JSON.parse(stdout);
+        data = {
+          title: ytdlpData.title || 'Unknown',
+          duration: ytdlpData.duration || 0,
+          thumbnail: ytdlpData.thumbnail || null,
+        };
+      } catch (ytdlpErr) {
+        throw new Error('Could not fetch video info. All sources failed.');
+      }
+    }
+    res.json(data);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -127,6 +261,8 @@ app.post('/api/video-info', async (req, res) => {
 app.post('/api/sounds', async (req, res) => {
   const { youtubeUrl, startSec, endSec } = req.body;
   if (!youtubeUrl) return res.status(400).json({ error: 'YouTube URL is required' });
+  const videoId = extractVideoId(youtubeUrl);
+  if (!videoId) return res.status(400).json({ error: 'Invalid YouTube URL' });
   const id = crypto.randomBytes(8).toString('hex');
   const outputPath = path.join(CACHE_DIR, `${id}.mp3`);
   const duration = endSec - startSec;
@@ -143,15 +279,29 @@ app.post('/api/sounds', async (req, res) => {
       '--no-playlist',
       '--no-check-formats',
       '--embed-metadata',
+      '--force-ipv4',
       youtubeUrl,
     ], 120_000, YTDLP_CLIENTS_DOWNLOAD);
-
     res.json({ id });
-  } catch (err) {
-    if (fs.existsSync(outputPath)) {
-      fs.unlinkSync(outputPath);
+  } catch (ytdlpErr) {
+    console.log('yt-dlp download failed, trying Piped fallback...');
+    if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+    try {
+      const audioStreams = await tryPipedStreams(videoId);
+      if (!audioStreams || audioStreams.length === 0) {
+        throw new Error('No audio streams available from Piped');
+      }
+      const audioUrl = audioStreams[0].url;
+      console.log('Downloading from Piped stream:', audioUrl.substring(0, 80) + '...');
+      await downloadAndTrim(audioUrl, outputPath, startSec, duration);
+      if (!fs.existsSync(outputPath)) {
+        throw new Error('ffmpeg failed to produce output file');
+      }
+      console.log('Piped download + ffmpeg trim succeeded');
+      res.json({ id });
+    } catch (pipedErr) {
+      res.status(500).json({ error: `yt-dlp: ${ytdlpErr.message}. Piped fallback: ${pipedErr.message}` });
     }
-    res.status(500).json({ error: err.message });
   }
 });
 
