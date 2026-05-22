@@ -278,6 +278,11 @@ function updateSliderDisplays(e) {
 }
 
 async function processSound(youtubeUrl, startSec, endSec) {
+  const cookieCheck = await fetch('/api/cookies');
+  const cookieData = await cookieCheck.json();
+  if (!cookieData.loaded) {
+    throw new Error('YouTube cookies not set. Click the 🍪 button in the header, paste your cookies.txt content (Netscape format), and try again.');
+  }
   const res = await fetch('/api/sounds', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

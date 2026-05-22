@@ -167,10 +167,13 @@ app.post('/api/video-info', async (req, res) => {
       const dur = await tryYtdlpDuration(youtubeUrl);
       if (dur) data.duration = dur;
     }
+    if (data && data.duration === 0) {
+      data.duration = 600;
+    }
     if (!data) {
       const stdout = await ytdlpWithRetry(['--dump-json', '--no-warnings', youtubeUrl]);
       data = JSON.parse(stdout);
-      data = { title: data.title, duration: data.duration || 0, thumbnail: data.thumbnail || null };
+      data = { title: data.title, duration: data.duration || 600, thumbnail: data.thumbnail || null };
     }
     res.json(data);
   } catch (err) {
