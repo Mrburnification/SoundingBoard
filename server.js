@@ -70,6 +70,34 @@ async function tryOembed(youtubeUrl) {
   return null;
 }
 
+async function tryGetDuration(videoId) {
+  for (const host of INVIDIOUS_INSTANCES) {
+    try {
+      const data = await fetchJson(host, `/api/v1/videos/${videoId}`);
+      if (data && data.lengthSeconds) {
+        console.log('Got duration from Invidious:', host);
+        return data.lengthSeconds;
+      }
+    } catch { /* skip */ }
+  }
+  return null;
+}
+
+async function tryYtdlpDuration(youtubeUrl) {
+  try {
+    console.log('Trying yt-dlp for duration...');
+    const stdout = await ytdlp(['--dump-json', '--no-warnings', '--extractor-args', 'youtube:player_client=tv_embedded;player_skip=webpage', youtubeUrl]);
+    const d = JSON.parse(stdout);
+    if (d && d.duration) {
+      console.log('yt-dlp duration succeeded:', d.duration);
+      return d.duration;
+    }
+  } catch (e) {
+    console.log('yt-dlp duration failed:', e.message);
+  }
+  return null;
+}
+
 async function tryInvidious(videoId) {
   for (const host of INVIDIOUS_INSTANCES) {
     try {
@@ -230,15 +258,20 @@ app.post('/api/video-info', async (req, res) => {
     if (!videoId) return res.status(400).json({ error: 'Invalid YouTube URL' });
 
     let data;
-    // Try oEmbed first (free, unlimited, never blocked)
     data = await tryOembed(youtubeUrl);
+    if (data && data.duration === 0) {
+      const dur = await tryGetDuration(videoId);
+      if (dur) data.duration = dur;
+    }
+    if (data && data.duration === 0) {
+      const dur = await tryYtdlpDuration(youtubeUrl);
+      if (dur) data.duration = dur;
+    }
     if (!data) {
-      // Fallback to Invidious
-      console.log('oEmbed failed, trying Invidious fallback...');
+      console.log('oEmbed failed, trying Invidious...');
       data = await tryInvidious(videoId);
     }
     if (!data) {
-      // Last resort: yt-dlp
       console.log('Invidious failed, trying yt-dlp...');
       try {
         const stdout = await ytdlpWithRetry(['--dump-json', '--no-warnings', youtubeUrl]);
@@ -248,7 +281,7 @@ app.post('/api/video-info', async (req, res) => {
           duration: ytdlpData.duration || 0,
           thumbnail: ytdlpData.thumbnail || null,
         };
-      } catch (ytdlpErr) {
+      } catch {
         throw new Error('Could not fetch video info. All sources failed.');
       }
     }
