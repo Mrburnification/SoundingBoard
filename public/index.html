@@ -10,6 +10,8 @@
   <header>
     <h1>Soundboard</h1>
     <div class="header-controls">
+      <button id="cookieBtn" class="icon-btn" title="YouTube Cookies">🍪</button>
+      <span id="cookieBadge" class="badge hidden"></span>
       <label class="toggle-label" title="Allow multiple sounds at once">
         <span>Simultaneous</span>
         <input type="checkbox" id="polyToggle">
@@ -90,6 +92,23 @@
 
         <button id="saveBtn" class="primary">Add to Soundboard</button>
       </div>
+    </div>
+  </div>
+
+  <div id="cookieModal" class="modal hidden">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+      <button class="close-btn close-cookies">&times;</button>
+      <h2>YouTube Cookies</h2>
+      <p class="settings-desc">
+        Required for downloading audio from YouTube. Export cookies using
+        <a href="https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc" target="_blank" rel="noopener">Get cookies.txt LOCALLY</a> (Netscape format), then paste here.
+      </p>
+      <div class="form-group">
+        <textarea id="cookieTextarea" rows="10" placeholder="# Netscape HTTP Cookie File&#10;# Paste your cookies.txt content here...&#10;.youtube.com	TRUE	/	TRUE	1234567890	CONSENT	YES+..." style="font-size:11px;font-family:monospace;resize:vertical;"></textarea>
+      </div>
+      <div id="cookieStatus" class="status-msg"></div>
+      <button id="saveCookiesBtn" class="primary">Save Cookies</button>
     </div>
   </div>
 

@@ -9,6 +9,7 @@ const https = require('https');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const CACHE_DIR = path.join(__dirname, 'cache');
+const COOKIES_TMP = path.join(__dirname, 'cookies_runtime.txt');
 
 if (!fs.existsSync(CACHE_DIR)) {
   fs.mkdirSync(CACHE_DIR, { recursive: true });
@@ -18,25 +19,12 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// ── YouTube helpers ────────────────────────────────────────────────
+
 function extractVideoId(url) {
   const match = url.match(/(?:v=|\/shorts\/|embed\/|v\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
   return match ? match[1] : null;
 }
-
-const INVIDIOUS_INSTANCES = [
-  'vid.puffyan.us',
-  'invidious.fdn.fr',
-  'inv.tux.pizza',
-  'invidious.privacyredirect.com',
-  'yt.artemislena.eu',
-];
-
-const PIPED_INSTANCES = [
-  'pipedapi.kavin.rocks',
-  'pipedapi.in.projectsegfau.lt',
-  'api.piped.projectsegfau.lt',
-  'piped-api.privacyredirect.com',
-];
 
 function fetchJson(host, p) {
   return new Promise((resolve, reject) => {
@@ -51,147 +39,34 @@ function fetchJson(host, p) {
   });
 }
 
-async function tryOembed(youtubeUrl) {
-  try {
-    console.log('Trying YouTube oEmbed API...');
-    const encodedUrl = encodeURIComponent(youtubeUrl);
-    const data = await fetchJson('www.youtube.com', `/oembed?url=${encodedUrl}&format=json`);
-    if (data && data.title) {
-      console.log('oEmbed succeeded');
-      return {
-        title: data.title,
-        duration: 0,
-        thumbnail: data.thumbnail_url || null,
-      };
-    }
-  } catch (e) {
-    console.log('oEmbed failed:', e.message);
-  }
-  return null;
-}
-
-async function tryGetDuration(videoId) {
-  for (const host of INVIDIOUS_INSTANCES) {
-    try {
-      const data = await fetchJson(host, `/api/v1/videos/${videoId}`);
-      if (data && data.lengthSeconds) {
-        console.log('Got duration from Invidious:', host);
-        return data.lengthSeconds;
-      }
-    } catch { /* skip */ }
-  }
-  return null;
-}
-
-async function tryYtdlpDuration(youtubeUrl) {
-  try {
-    console.log('Trying yt-dlp for duration...');
-    const stdout = await ytdlp(['--dump-json', '--no-warnings', '--extractor-args', 'youtube:player_client=tv_embedded;player_skip=webpage', youtubeUrl]);
-    const d = JSON.parse(stdout);
-    if (d && d.duration) {
-      console.log('yt-dlp duration succeeded:', d.duration);
-      return d.duration;
-    }
-  } catch (e) {
-    console.log('yt-dlp duration failed:', e.message);
-  }
-  return null;
-}
-
-async function tryInvidious(videoId) {
-  for (const host of INVIDIOUS_INSTANCES) {
-    try {
-      console.log('Trying Invidious:', host);
-      const data = await fetchJson(host, `/api/v1/videos/${videoId}`);
-      if (data && data.title) {
-        console.log('Invidious succeeded:', host);
-        return {
-          title: data.title,
-          duration: data.lengthSeconds || 0,
-          thumbnail: data.videoThumbnails?.find(t => t.quality === 'maxresdefault')?.url || data.videoThumbnails?.[0]?.url || null,
-        };
-      }
-    } catch (e) {
-      console.log('Invidious failed:', host, e.message);
-    }
-  }
-  return null;
-}
-
-async function tryPipedStreams(videoId) {
-  for (const host of PIPED_INSTANCES) {
-    try {
-      console.log('Trying Piped:', host);
-      const data = await fetchJson(host, `/streams/${videoId}`);
-      if (data && data.audioStreams) {
-        console.log('Piped succeeded:', host);
-        return data.audioStreams;
-      }
-    } catch (e) {
-      console.log('Piped failed:', host, e.message);
-    }
-  }
-  return null;
-}
-
-function downloadAndTrim(audioUrl, outputPath, startSec, duration) {
-  return new Promise((resolve, reject) => {
-    const ffmpegArgs = [
-      '-y',
-      '-i', audioUrl,
-      '-ss', String(startSec),
-      '-t', String(duration),
-      '-vn',
-      '-acodec', 'libmp3lame',
-      '-q:a', '9',
-      '-ar', '44100',
-      '-ac', '2',
-      outputPath,
-    ];
-    const proc = execFile('ffmpeg', ffmpegArgs, {
-      maxBuffer: 50 * 1024 * 1024,
-      timeout: 120_000,
-    }, (err, stdout, stderr) => {
-      if (err) {
-        console.error('ffmpeg error:', err.message);
-        reject(new Error(stderr.split('\n').filter(l => l.startsWith('Error')).join(' ') || err.message));
-      } else {
-        resolve();
-      }
-    });
-  });
-}
+// ── Cookie management ───────────────────────────────────────────────
 
 const YTDLP = process.platform === 'win32' ? ['python', '-m', 'yt_dlp'] : ['yt-dlp'];
+let cookiesPath = null;
 
-let COOKIES_ARG = null;
-
-const COOKIES_PATHS = [
-  path.join(__dirname, 'cookies.txt'),
-  '/etc/secrets/cookies.txt',
-];
-for (const p of COOKIES_PATHS) {
-  if (fs.existsSync(p)) {
-    COOKIES_ARG = p;
-    console.log('Cookies found at:', p);
-    break;
+function detectCookies() {
+  if (fs.existsSync(COOKIES_TMP)) {
+    cookiesPath = COOKIES_TMP;
+  } else {
+    const paths = [path.join(__dirname, 'cookies.txt'), '/etc/secrets/cookies.txt'];
+    const found = paths.find(p => fs.existsSync(p));
+    if (found) { cookiesPath = found; }
+  }
+  if (!cookiesPath && process.env.COOKIES) {
+    try {
+      fs.writeFileSync(COOKIES_TMP, process.env.COOKIES, 'utf-8');
+      cookiesPath = COOKIES_TMP;
+    } catch (e) { /* will try later */ }
   }
 }
 
-if (!COOKIES_ARG && process.env.COOKIES) {
-  const tmpPath = path.join(__dirname, 'cookies_env.txt');
-  try {
-    fs.writeFileSync(tmpPath, process.env.COOKIES, 'utf-8');
-    COOKIES_ARG = tmpPath;
-    console.log('Cookies loaded from COOKIES env var ->', tmpPath);
-  } catch (e) {
-    console.error('Failed to write cookies from env var:', e.message);
-  }
+detectCookies();
+
+function cookiesLoaded() {
+  return !!cookiesPath;
 }
 
-if (!COOKIES_ARG) {
-  console.log('No cookies found. Will use Piped/Invidious fallback.');
-}
+// ── yt-dlp ──────────────────────────────────────────────────────────
 
 const YTDLP_CLIENTS = [
   'youtube:player_client=tv_embedded;player_skip=webpage',
@@ -200,16 +75,9 @@ const YTDLP_CLIENTS = [
   'youtube:player_client=web;player_skip=webpage',
 ];
 
-const YTDLP_CLIENTS_DOWNLOAD = [
-  'youtube:player_client=tv_embedded',
-  'youtube:player_client=mweb',
-  'youtube:player_client=web',
-  'youtube:player_client=ios',
-];
-
 function ytdlp(args, timeoutMs = 120_000) {
   const allArgs = [...args];
-  if (COOKIES_ARG) allArgs.push('--cookies', COOKIES_ARG);
+  if (cookiesPath) allArgs.push('--cookies', cookiesPath);
   return new Promise((resolve, reject) => {
     const proc = execFile(YTDLP[0], [...YTDLP.slice(1), ...allArgs], {
       maxBuffer: 10 * 1024 * 1024,
@@ -220,7 +88,6 @@ function ytdlp(args, timeoutMs = 120_000) {
         const lines = stderr.split('\n');
         const errorLine = lines.find(l => l.startsWith('ERROR')) || lines.find(l => l.startsWith('WARNING'));
         const msg = errorLine ? errorLine.replace(/^(ERROR|WARNING):\s*/, '') : err.message;
-        console.error('yt-dlp error:', msg);
         reject(new Error(msg));
       } else {
         resolve(stdout);
@@ -233,22 +100,60 @@ async function ytdlpWithRetry(baseArgs, timeoutMs = 120_000, clients = YTDLP_CLI
   for (const client of clients) {
     const args = [...baseArgs, '--extractor-args', client];
     try {
-      console.log('Trying yt-dlp client:', client.split(';')[0].replace('youtube:', ''));
       const result = await ytdlp(args, timeoutMs);
-      console.log('yt-dlp succeeded with client:', client.split(';')[0].replace('youtube:', ''));
       return result;
     } catch (err) {
-      const isRetryable = err.message.includes('bot') || err.message.includes('Sign in') || err.message.includes('format is not available') || err.message.includes('Postprocessing');
-      if (!isRetryable) {
+      if (!err.message.includes('bot') && !err.message.includes('Sign in') &&
+          !err.message.includes('format is not available') && !err.message.includes('Postprocessing')) {
         throw err;
       }
-      console.log('Client', client.split(';')[0].replace('youtube:', ''), 'failed - trying next...');
     }
   }
   throw new Error('All player clients failed');
 }
 
+// ── YouTube oEmbed (free, never blocked) ────────────────────────────
+
+async function tryOembed(youtubeUrl) {
+  try {
+    const encodedUrl = encodeURIComponent(youtubeUrl);
+    const data = await fetchJson('www.youtube.com', `/oembed?url=${encodedUrl}&format=json`);
+    if (data && data.title) {
+      return { title: data.title, duration: 0, thumbnail: data.thumbnail_url || null };
+    }
+  } catch { /* skip */ }
+  return null;
+}
+
+async function tryYtdlpDuration(youtubeUrl) {
+  try {
+    const stdout = await ytdlp(['--dump-json', '--no-warnings', '--extractor-args', 'youtube:player_client=tv_embedded;player_skip=webpage', youtubeUrl], 30000);
+    const d = JSON.parse(stdout);
+    if (d && d.duration) return d.duration;
+  } catch { /* skip */ }
+  return null;
+}
+
+// ── API ─────────────────────────────────────────────────────────────
+
 app.get('/api/health', (req, res) => res.json({ ok: true }));
+
+app.get('/api/cookies', (req, res) => {
+  res.json({ loaded: cookiesLoaded() });
+});
+
+app.post('/api/cookies', (req, res) => {
+  const { cookies } = req.body;
+  if (!cookies) return res.status(400).json({ error: 'Cookies text is required' });
+  try {
+    fs.writeFileSync(COOKIES_TMP, cookies, 'utf-8');
+    cookiesPath = COOKIES_TMP;
+    console.log('Cookies updated via paste (runtime)');
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to save cookies' });
+  }
+});
 
 app.post('/api/video-info', async (req, res) => {
   try {
@@ -257,33 +162,15 @@ app.post('/api/video-info', async (req, res) => {
     const videoId = extractVideoId(youtubeUrl);
     if (!videoId) return res.status(400).json({ error: 'Invalid YouTube URL' });
 
-    let data;
-    data = await tryOembed(youtubeUrl);
-    if (data && data.duration === 0) {
-      const dur = await tryGetDuration(videoId);
-      if (dur) data.duration = dur;
-    }
+    let data = await tryOembed(youtubeUrl);
     if (data && data.duration === 0) {
       const dur = await tryYtdlpDuration(youtubeUrl);
       if (dur) data.duration = dur;
     }
     if (!data) {
-      console.log('oEmbed failed, trying Invidious...');
-      data = await tryInvidious(videoId);
-    }
-    if (!data) {
-      console.log('Invidious failed, trying yt-dlp...');
-      try {
-        const stdout = await ytdlpWithRetry(['--dump-json', '--no-warnings', youtubeUrl]);
-        const ytdlpData = JSON.parse(stdout);
-        data = {
-          title: ytdlpData.title || 'Unknown',
-          duration: ytdlpData.duration || 0,
-          thumbnail: ytdlpData.thumbnail || null,
-        };
-      } catch {
-        throw new Error('Could not fetch video info. All sources failed.');
-      }
+      const stdout = await ytdlpWithRetry(['--dump-json', '--no-warnings', youtubeUrl]);
+      data = JSON.parse(stdout);
+      data = { title: data.title, duration: data.duration || 0, thumbnail: data.thumbnail || null };
     }
     res.json(data);
   } catch (err) {
@@ -294,8 +181,6 @@ app.post('/api/video-info', async (req, res) => {
 app.post('/api/sounds', async (req, res) => {
   const { youtubeUrl, startSec, endSec } = req.body;
   if (!youtubeUrl) return res.status(400).json({ error: 'YouTube URL is required' });
-  const videoId = extractVideoId(youtubeUrl);
-  if (!videoId) return res.status(400).json({ error: 'Invalid YouTube URL' });
   const id = crypto.randomBytes(8).toString('hex');
   const outputPath = path.join(CACHE_DIR, `${id}.mp3`);
   const duration = endSec - startSec;
@@ -314,64 +199,41 @@ app.post('/api/sounds', async (req, res) => {
       '--embed-metadata',
       '--force-ipv4',
       youtubeUrl,
-    ], 120_000, YTDLP_CLIENTS_DOWNLOAD);
+    ]);
     res.json({ id });
-  } catch (ytdlpErr) {
-    console.log('yt-dlp download failed, trying Piped fallback...');
+  } catch (err) {
     if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
-    try {
-      const audioStreams = await tryPipedStreams(videoId);
-      if (!audioStreams || audioStreams.length === 0) {
-        throw new Error('No audio streams available from Piped');
-      }
-      const audioUrl = audioStreams[0].url;
-      console.log('Downloading from Piped stream:', audioUrl.substring(0, 80) + '...');
-      await downloadAndTrim(audioUrl, outputPath, startSec, duration);
-      if (!fs.existsSync(outputPath)) {
-        throw new Error('ffmpeg failed to produce output file');
-      }
-      console.log('Piped download + ffmpeg trim succeeded');
-      res.json({ id });
-    } catch (pipedErr) {
-      res.status(500).json({ error: `yt-dlp: ${ytdlpErr.message}. Piped fallback: ${pipedErr.message}` });
-    }
+    res.status(500).json({ error: err.message });
   }
 });
 
 app.get('/api/sounds/:id.mp3', (req, res) => {
   const filePath = path.join(CACHE_DIR, `${req.params.id}.mp3`);
-  if (!fs.existsSync(filePath)) {
-    return res.status(404).json({ error: 'Sound not found' });
-  }
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Sound not found' });
   res.sendFile(filePath);
 });
 
 app.delete('/api/sounds/:id', (req, res) => {
   const filePath = path.join(CACHE_DIR, `${req.params.id}.mp3`);
-  if (fs.existsSync(filePath)) {
-    fs.unlinkSync(filePath);
-  }
+  if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
   res.json({ success: true });
 });
 
-// Global error handler — always return JSON
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err.message);
   res.status(500).json({ error: err.message || 'Internal server error' });
 });
 
-// Periodic cleanup of stale cache files (older than 10 minutes)
 setInterval(() => {
   if (!fs.existsSync(CACHE_DIR)) return;
   const cutoff = Date.now() - 10 * 60 * 1000;
   for (const f of fs.readdirSync(CACHE_DIR)) {
     const fp = path.join(CACHE_DIR, f);
-    try {
-      if (fs.statSync(fp).mtimeMs < cutoff) fs.unlinkSync(fp);
-    } catch { /* race condition, skip */ }
+    try { if (fs.statSync(fp).mtimeMs < cutoff) fs.unlinkSync(fp); } catch { /* race */ }
   }
 }, 5 * 60 * 1000);
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Soundboard running at http://localhost:${PORT}`);
+  const status = cookiesLoaded() ? `cookies at ${cookiesPath}` : 'NO cookies';
+  console.log(`Soundboard running at http://0.0.0.0:${PORT} | ${status}`);
 });

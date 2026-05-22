@@ -429,5 +429,85 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations().then(r => r.forEach(r => r.unregister()));
 }
 
+// ── Cookie paste (YouTube login bypass) ────────────────────────────
+
+const cookieEls = {
+  cookieBtn: $('#cookieBtn'),
+  cookieBadge: $('#cookieBadge'),
+  cookieModal: $('#cookieModal'),
+  cookieStatus: $('#cookieStatus'),
+  cookieTextarea: $('#cookieTextarea'),
+  saveCookiesBtn: $('#saveCookiesBtn'),
+  closeCookies: $('.close-cookies'),
+};
+
+async function checkCookies() {
+  try {
+    const res = await fetch('/api/cookies');
+    const data = await res.json();
+    const badge = cookieEls.cookieBadge;
+    badge.classList.toggle('hidden', false);
+    if (data.loaded) {
+      badge.className = 'badge ok';
+      badge.title = 'Cookies loaded';
+    } else {
+      badge.className = 'badge none';
+      badge.title = 'No cookies - click 🍪 to set up';
+    }
+  } catch {
+    cookieEls.cookieBadge.classList.add('hidden');
+  }
+}
+
+function openCookieModal() {
+  cookieEls.cookieModal.classList.remove('hidden');
+  cookieEls.cookieStatus.textContent = '';
+}
+
+function closeCookieModal() {
+  cookieEls.cookieModal.classList.add('hidden');
+}
+
+async function saveCookies() {
+  const cookies = cookieEls.cookieTextarea.value.trim();
+  if (!cookies) {
+    cookieEls.cookieStatus.textContent = 'Please paste cookies content first';
+    cookieEls.cookieStatus.style.color = '#e74c3c';
+    return;
+  }
+  cookieEls.saveCookiesBtn.disabled = true;
+  cookieEls.saveCookiesBtn.textContent = 'Saving...';
+  try {
+    const res = await fetch('/api/cookies', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cookies }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      cookieEls.cookieStatus.textContent = 'Cookies saved! YouTube downloads should work now.';
+      cookieEls.cookieStatus.style.color = '#2ecc71';
+      closeCookieModal();
+      checkCookies();
+    } else {
+      cookieEls.cookieStatus.textContent = 'Error: ' + (data.error || 'Unknown');
+      cookieEls.cookieStatus.style.color = '#e74c3c';
+    }
+  } catch (err) {
+    cookieEls.cookieStatus.textContent = 'Error: ' + err.message;
+    cookieEls.cookieStatus.style.color = '#e74c3c';
+  } finally {
+    cookieEls.saveCookiesBtn.disabled = false;
+    cookieEls.saveCookiesBtn.textContent = 'Save Cookies';
+  }
+}
+
+cookieEls.cookieBtn.addEventListener('click', openCookieModal);
+cookieEls.closeCookies.addEventListener('click', closeCookieModal);
+cookieEls.cookieModal.querySelector('.modal-overlay').addEventListener('click', closeCookieModal);
+cookieEls.saveCookiesBtn.addEventListener('click', saveCookies);
+
+checkCookies();
+
 loadState();
 render();
