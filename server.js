@@ -49,7 +49,21 @@ if (!COOKIES_ARG) {
   console.log('No cookies found. Private/restricted videos will fail.');
 }
 
-const EXTRACTOR_ARGS = 'youtube:player_client=android,web;skip=webpage';
+const YTDLP_CLIENTS = [
+  'youtube:player_client=mweb;player_skip=webpage',
+  'youtube:player_client=tv_embedded;player_skip=webpage',
+  'youtube:player_client=ios;player_skip=webpage',
+  'youtube:player_client=web;player_skip=webpage',
+  'youtube:player_client=tv;player_skip=webpage',
+];
+
+const YTDLP_CLIENTS_DOWNLOAD = [
+  'youtube:player_client=mweb',
+  'youtube:player_client=web',
+  'youtube:player_client=ios',
+  'youtube:player_client=tv_embedded',
+  'youtube:player_client=tv',
+];
 
 function ytdlp(args, timeoutMs = 120_000) {
   const allArgs = [...args];
@@ -73,13 +87,32 @@ function ytdlp(args, timeoutMs = 120_000) {
   });
 }
 
+async function ytdlpWithRetry(baseArgs, timeoutMs = 120_000, clients = YTDLP_CLIENTS) {
+  for (const client of clients) {
+    const args = [...baseArgs, '--extractor-args', client];
+    try {
+      console.log('Trying yt-dlp client:', client.split(';')[0].replace('youtube:', ''));
+      const result = await ytdlp(args, timeoutMs);
+      console.log('yt-dlp succeeded with client:', client.split(';')[0].replace('youtube:', ''));
+      return result;
+    } catch (err) {
+      const isRetryable = err.message.includes('bot') || err.message.includes('Sign in') || err.message.includes('format is not available') || err.message.includes('Postprocessing');
+      if (!isRetryable) {
+        throw err;
+      }
+      console.log('Client', client.split(';')[0].replace('youtube:', ''), 'failed - trying next...');
+    }
+  }
+  throw new Error('All player clients failed. Try refreshing cookies.');
+}
+
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
 app.post('/api/video-info', async (req, res) => {
   try {
     const { youtubeUrl } = req.body;
     if (!youtubeUrl) return res.status(400).json({ error: 'YouTube URL is required' });
-    const stdout = await ytdlp(['--dump-json', '--no-warnings', '--extractor-args', EXTRACTOR_ARGS, youtubeUrl]);
+    const stdout = await ytdlpWithRetry(['--dump-json', '--no-warnings', youtubeUrl]);
     const data = JSON.parse(stdout);
     res.json({
       title: data.title || 'Unknown',
@@ -99,8 +132,8 @@ app.post('/api/sounds', async (req, res) => {
   const duration = endSec - startSec;
 
   try {
-    await ytdlp([
-      '-f', 'worstaudio/worst',
+    await ytdlpWithRetry([
+      '-f', 'bestaudio',
       '--extract-audio',
       '--audio-format', 'mp3',
       '--audio-quality', '10',
@@ -110,9 +143,8 @@ app.post('/api/sounds', async (req, res) => {
       '--no-playlist',
       '--no-check-formats',
       '--embed-metadata',
-      '--extractor-args', EXTRACTOR_ARGS,
       youtubeUrl,
-    ]);
+    ], 120_000, YTDLP_CLIENTS_DOWNLOAD);
 
     res.json({ id });
   } catch (err) {
