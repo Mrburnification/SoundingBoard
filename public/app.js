@@ -425,5 +425,9 @@ document.addEventListener('click', (e) => {
   }
 });
 
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then(r => r.forEach(r => r.unregister()));
+}
+
 loadState();
 render();

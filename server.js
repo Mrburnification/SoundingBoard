@@ -19,21 +19,46 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const YTDLP = process.platform === 'win32' ? ['python', '-m', 'yt_dlp'] : ['yt-dlp'];
 
+let COOKIES_ARG = null;
+
 const COOKIES_PATHS = [
   path.join(__dirname, 'cookies.txt'),
   '/etc/secrets/cookies.txt',
 ];
-const COOKIES_ARG = COOKIES_PATHS.find(p => fs.existsSync(p));
+for (const p of COOKIES_PATHS) {
+  if (fs.existsSync(p)) {
+    COOKIES_ARG = p;
+    console.log('Cookies found at:', p);
+    break;
+  }
+}
+
+// Fallback: COOKIES env var (Render Environment Variable with raw cookie content)
+if (!COOKIES_ARG && process.env.COOKIES) {
+  const tmpPath = path.join(__dirname, 'cookies_env.txt');
+  try {
+    fs.writeFileSync(tmpPath, process.env.COOKIES, 'utf-8');
+    COOKIES_ARG = tmpPath;
+    console.log('Cookies loaded from COOKIES env var ->', tmpPath);
+  } catch (e) {
+    console.error('Failed to write cookies from env var:', e.message);
+  }
+}
+
+if (!COOKIES_ARG) {
+  console.log('No cookies found. Private/restricted videos will fail.');
+}
 
 const EXTRACTOR_ARGS = 'youtube:player_client=android,web;skip=webpage';
 
-function ytdlp(args) {
+function ytdlp(args, timeoutMs = 120_000) {
   const allArgs = [...args];
   if (COOKIES_ARG) allArgs.push('--cookies', COOKIES_ARG);
   return new Promise((resolve, reject) => {
     const proc = execFile(YTDLP[0], [...YTDLP.slice(1), ...allArgs], {
       maxBuffer: 10 * 1024 * 1024,
       cwd: __dirname,
+      timeout: timeoutMs,
     }, (err, stdout, stderr) => {
       if (err) {
         const lines = stderr.split('\n');
@@ -75,7 +100,7 @@ app.post('/api/sounds', async (req, res) => {
 
   try {
     await ytdlp([
-      '-f', 'worstaudio',
+      '-f', 'worstaudio/worst',
       '--extract-audio',
       '--audio-format', 'mp3',
       '--audio-quality', '10',
